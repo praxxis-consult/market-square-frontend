@@ -8,7 +8,7 @@ import { useIdentityToken, usePrivy } from "@privy-io/react-auth";
 import { useSocialAuth } from "decane-connect-kit";
 import { Button, Spinner } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
-import { DEMO_AUTH, LEGACY_PRIVY_APP_ID } from "@/lib/auth-mode";
+import { DEMO_AUTH, LEGACY_PRIVY_APP_ID, PRIVY_AUTH } from "@/lib/auth-mode";
 import {
   clearLegacySignIn,
   legacySignInIntended,
@@ -80,7 +80,10 @@ export function MoveAccountPage({
    */
   onContinueAsNew?: () => void;
 }) {
-  if (DEMO_AUTH || !LEGACY_PRIVY_APP_ID) {
+  // PRIVY_AUTH: the session already IS a Privy one, so there is no old account
+  // to bring across — and the Decane hooks in LinkFlow below would throw with
+  // DecaneKit unmounted. See use-account-state.ts.
+  if (DEMO_AUTH || PRIVY_AUTH || !LEGACY_PRIVY_APP_ID) {
     return (
       <Frame title="Upgrade your account">
         <p>Upgrading an account isn&apos;t available in this build.</p>

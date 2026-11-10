@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import { useSocialAuth, useSocialWallet } from "decane-connect-kit";
 import { Spinner } from "@/components/ui/button";
 import { SquareLockup } from "@/components/ui/square-mark";
-import { DEMO_AUTH } from "@/lib/auth-mode";
+import { usePrivy, useLoginWithEmail, useLoginWithOAuth } from "@privy-io/react-auth";
+import { DEMO_AUTH, PRIVY_AUTH, PRIVY_GOOGLE } from "@/lib/auth-mode";
 import { cn } from "@/lib/cn";
 
 /**
@@ -459,6 +460,189 @@ function DecaneForm() {
   );
 }
 
+/**
+ * THE PRIVY FORM — the `NEXT_PUBLIC_AUTH_PROVIDER=privy` leg.
+ *
+ * The same two-step email rhythm the Decane form uses, against Privy's own
+ * `sendCode` / `loginWithCode`, plus the Ark button when the app can actually
+ * serve it.
+ *
+ * ─── THE ARK BUTTON IS CONDITIONAL, AND THAT IS THE POINT ───────────────────
+ * It was absent at first because the staging app had `google_oauth` false, and
+ * a button that opens a provider the app has disabled fails every time it is
+ * pressed. It was switched on in the Privy dashboard on 2026-11-08, so it is
+ * drawn again — but behind `NEXT_PUBLIC_PRIVY_GOOGLE`, because the two Privy
+ * apps do not have to agree: whoever points this build at a Privy app without
+ * Google must be able to drop the button without editing this file.
+ *
+ * `apple_oauth`, `twitter_oauth`, `sms_auth` and `passkey_auth` remain false on
+ * that app, so there is still no X button and no passkey or device-password way
+ * back in. Same rule, same reason.
+ *
+ * The wallet option is NOT decoration. `wallet_auth` is true and
+ * `create_on_login` is off on both chains, so an email account can arrive with
+ * no embedded wallet at all — and the service refuses a tip whose recipient has
+ * no payable address. Signing in with an external wallet is the one door that
+ * guarantees an account has one.
+ */
+function PrivyForm() {
+  const { login } = usePrivy();
+  const { sendCode, loginWithCode } = useLoginWithEmail();
+  const { initOAuth } = useLoginWithOAuth();
+  const [oauthBusy, setOauthBusy] = useState(false);
+  const [email, setEmail] = useState("");
+  const [code, setCode] = useState("");
+  const [step, setStep] = useState<"email" | "code">("email");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const emailLooksReal = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim());
+
+  /*
+    THE SAME FLOW THE DECANE CARD HAD, AND THE SAME NAMING RULE.
+
+    Google is how you prove who you are; Ark is the account you land in. The
+    mark carries the brand and the words carry the action, which is why the
+    label never says "Google" even though pressing it opens Google's account
+    chooser.
+  */
+  const oauth = async () => {
+    setError(null);
+    setOauthBusy(true);
+    try {
+      await initOAuth({ provider: "google" });
+    } catch {
+      setError("That didn't complete. Try again, or use your email below.");
+    } finally {
+      setOauthBusy(false);
+    }
+  };
+
+  const submitEmail = async () => {
+    setError(null);
+    setBusy(true);
+    try {
+      await sendCode({ email: email.trim() });
+      setStep("code");
+    } catch {
+      setError("We couldn't send a code to that address. Check it and try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitCode = async () => {
+    setError(null);
+    setBusy(true);
+    try {
+      await loginWithCode({ code: code.trim() });
+    } catch {
+      setCode("");
+      setError("That code didn't match. Check it and try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (step === "code") {
+    return (
+      <form
+        className="contents"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void submitCode();
+        }}
+      >
+        <div className="mt-[61px] px-[27px]">
+          <p className="text-[14px] leading-[18px] text-[#999999]">
+            We sent a 6-digit code to <span className="text-white">{email.trim()}</span>.
+          </p>
+          <label htmlFor="ms-privy-code" className="mt-6 block text-[14px] font-medium text-white">
+            Code
+          </label>
+          <input
+            id="ms-privy-code"
+            autoFocus
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            className={cn(FIELD, "mt-2.5")}
+          />
+          {error && <p className="mt-3 text-[13px] text-danger">{error}</p>}
+        </div>
+        <div className="mt-auto px-6 pt-8 sm:px-[80px]">
+          <CardButton type="submit" busy={busy} disabled={code.trim().length === 0}>
+            {busy ? "Signing in…" : "Continue"}
+          </CardButton>
+          <button
+            type="button"
+            onClick={() => {
+              setError(null);
+              setCode("");
+              setStep("email");
+            }}
+            className="mt-4 w-full text-center text-[14px] text-[#999999] transition-colors hover:text-white"
+          >
+            Use another email
+          </button>
+        </div>
+      </form>
+    );
+  }
+
+  return (
+    <form
+      className="contents"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void submitEmail();
+      }}
+    >
+      <div className="mt-[61px] px-[27px]">
+        {PRIVY_GOOGLE && (
+          <>
+            <CardButton busy={oauthBusy} onClick={() => void oauth()}>
+              <ArkMark className="h-[18px] w-auto" />
+              <span>Continue with your account</span>
+            </CardButton>
+            <div className="my-6 flex items-center gap-4">
+              <span className="h-px flex-1 bg-white/10" />
+              <span className="text-[13px] text-[#5A5A5A]">or</span>
+              <span className="h-px flex-1 bg-white/10" />
+            </div>
+          </>
+        )}
+        <label htmlFor="ms-privy-email" className="block text-[14px] font-medium text-white">
+          Email
+        </label>
+        <input
+          id="ms-privy-email"
+          type="email"
+          autoComplete="email"
+          placeholder="Enter Email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          className={cn(FIELD, "mt-2.5")}
+        />
+        {error && <p className="mt-3 text-[13px] text-danger">{error}</p>}
+      </div>
+      <div className="mt-8 px-6 pb-1 sm:px-[80px] lg:mt-auto">
+        <CardButton type="submit" busy={busy} disabled={!emailLooksReal}>
+          {busy ? "Sending…" : "Continue"}
+        </CardButton>
+        <button
+          type="button"
+          onClick={login}
+          className="mt-4 w-full text-center text-[14px] text-[#999999] transition-colors hover:text-white"
+        >
+          Use a wallet instead
+        </button>
+      </div>
+    </form>
+  );
+}
+
 /** No Decane provider is mounted in demo mode, so its hooks cannot be called. */
 function DemoForm() {
   return (
@@ -472,7 +656,7 @@ function DemoForm() {
   );
 }
 
-const Form = DEMO_AUTH ? DemoForm : DecaneForm;
+const Form = DEMO_AUTH ? DemoForm : PRIVY_AUTH ? PrivyForm : DecaneForm;
 
 export function SignInCard({
   onSkip,

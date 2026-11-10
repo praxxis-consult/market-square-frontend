@@ -3,7 +3,8 @@
 import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSocialAuth } from "decane-connect-kit";
-import { DEMO_AUTH, LEGACY_PRIVY_APP_ID } from "@/lib/auth-mode";
+import { usePrivy } from "@privy-io/react-auth";
+import { DEMO_AUTH, LEGACY_PRIVY_APP_ID, PRIVY_AUTH } from "@/lib/auth-mode";
 import { useAuth } from "@/hooks/use-auth";
 import {
   readCachedAccountState,
@@ -50,7 +51,16 @@ function storage(): Storage | null {
 export function useAccountState(): AccountStateAnswer {
   const { ready, authenticated } = useAuth();
   const { address, email } = useSignInIdentity();
-  const enabled = !DEMO_AUTH && Boolean(LEGACY_PRIVY_APP_ID);
+  /*
+    OFF ON THE PRIVY LEG, and not merely because the hooks would throw.
+
+    This whole flow exists to move an account OFF the old Privy app and ONTO
+    Decane. Under `NEXT_PUBLIC_AUTH_PROVIDER=privy` the session already IS a
+    Privy one, so there is nothing to move and `LEGACY_PRIVY_APP_ID` names the
+    app the reader is signed into — asking the link service to join that
+    account to itself is not a migration, it is a loop.
+  */
+  const enabled = !DEMO_AUTH && !PRIVY_AUTH && Boolean(LEGACY_PRIVY_APP_ID);
   const key = authenticated ? address : null;
 
   useEffect(() => {
@@ -90,6 +100,22 @@ function useDemoSignInIdentity(): SignInIdentity {
   return { address: null, email: undefined };
 }
 
+/**
+ * The Privy leg never asks the link service anything (`enabled` is false
+ * above), so this only has to be a hook that does not throw with `DecaneKit`
+ * unmounted. It still reports the real identity rather than nulls, so a reader
+ * of this hook sees the truth if the flow is ever turned on here.
+ */
+function usePrivySignInIdentity(): SignInIdentity {
+  const { user } = usePrivy();
+  return {
+    address: user?.wallet?.address ?? null,
+    email: user?.email?.address,
+  };
+}
+
 const useSignInIdentity: () => SignInIdentity = DEMO_AUTH
   ? useDemoSignInIdentity
-  : useDecaneSignInIdentity;
+  : PRIVY_AUTH
+    ? usePrivySignInIdentity
+    : useDecaneSignInIdentity;

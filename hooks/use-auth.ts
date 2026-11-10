@@ -2,7 +2,8 @@
 
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { useSocialAuth } from "decane-connect-kit";
-import { DEMO_AUTH } from "@/lib/auth-mode";
+import { usePrivy } from "@privy-io/react-auth";
+import { DEMO_AUTH, PRIVY_AUTH } from "@/lib/auth-mode";
 import { openSignIn } from "@/lib/signin-store";
 
 export interface AuthState {
@@ -71,10 +72,38 @@ function useDecaneAuth(): AuthState {
   };
 }
 
+/**
+ * The Privy leg (`NEXT_PUBLIC_AUTH_PROVIDER=privy`).
+ *
+ * Simpler than Decane's by one whole problem: Privy publishes its OWN `ready`,
+ * so none of the localStorage sniffing or the hydration grace below is needed —
+ * that machinery exists purely because the kit has no readiness flag.
+ *
+ * `authenticated` is Privy's, NOT "does the token mirror hold a token yet".
+ * `PrivyTokenBridge` fills that cache on an interval, so reading it here would
+ * report a freshly signed-in reader as signed out for up to one tick and bounce
+ * them back to the sign-in card.
+ */
+function usePrivyAuth(): AuthState {
+  const { ready, authenticated, logout } = usePrivy();
+  return {
+    ready,
+    authenticated,
+    // OURS, not the vendor's modal — the same rule the Decane leg follows:
+    // every route into signing in lands on the designed card.
+    login: openSignIn,
+    logout,
+  };
+}
+
 // Demo mode mounts no Decane provider, so the session is simply assumed; the
 // fixture BFF treats every caller as the demo user.
 function useDemoAuth(): AuthState {
   return { ready: true, authenticated: true, login: () => {}, logout: () => {} };
 }
 
-export const useAuth: () => AuthState = DEMO_AUTH ? useDemoAuth : useDecaneAuth;
+export const useAuth: () => AuthState = DEMO_AUTH
+  ? useDemoAuth
+  : PRIVY_AUTH
+    ? usePrivyAuth
+    : useDecaneAuth;

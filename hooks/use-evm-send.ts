@@ -2,8 +2,9 @@
 
 import { useCallback } from "react";
 import { useSocialWallet } from "decane-connect-kit";
+import { useWallets } from "@privy-io/react-auth";
 import type { EIP1193Provider, SignedAuthorization } from "viem";
-import { DEMO_AUTH } from "@/lib/auth-mode";
+import { DEMO_AUTH, PRIVY_AUTH } from "@/lib/auth-mode";
 import { sendSponsoredEvmCalls, type SignAuthorization } from "@/lib/trade/sponsor";
 import { getSponsoredEvmChainById } from "@/lib/trade/sponsored-evm";
 import { isReceiptChain, publicClientForChain } from "@/lib/trade/receipt";
@@ -184,6 +185,93 @@ function useDecaneEvmSend(): EvmSend {
 }
 
 /**
+ * THE PRIVY LEG — and the one place this switch is not feature-equivalent.
+ *
+ * ─── GAS IS NOT SPONSORED HERE, AND THAT IS SAID RATHER THAN HIDDEN ─────────
+ * The sponsorship stack above is Decane's: the 7702 authorization is signed by
+ * `wallet.signAuthorization`, which has no counterpart on a Privy embedded
+ * wallet, and reimplementing it would be porting wsws's whole bundler flow onto
+ * a second vendor to make a staging smoke test work. So a send on this leg is
+ * an ordinary EOA transaction and the reader pays their own gas — which, for an
+ * embedded wallet funded with USDC alone, means it will fail for want of ETH.
+ *
+ * That is acceptable ONLY because nothing in the staging tests routes here:
+ * staging runs `PAYMENT_RAIL=mock`, whose `clientSignedTransfers` is false, so
+ * the service settles server-side and every caller returns early before `send`
+ * (see the early return in `features/tips/hooks/use-tips.ts`). If this leg ever
+ * becomes more than a staging switch, sponsorship is the gap to close first.
+ *
+ * It still REFUSES honestly rather than resolving a plausible hash — the one
+ * rule the demo leg below exists to state.
+ */
+function usePrivyEvmSend(): EvmSend {
+  const { wallets } = useWallets();
+  // The embedded wallet only: the BFF proves ownership of the session's
+  // embedded address server-side, so a send from an injected wallet would be
+  // signed by an address the server will not accept. Same rule as use-wallet.
+  const embedded = wallets.find((w) => w.walletClientType === "privy");
+
+  const send = useCallback(
+    async ({ to, data, value, chainId }: EvmSendInput): Promise<`0x${string}`> => {
+      if (!embedded) throw new Error("No wallet is connected.");
+      // The provider carries an ambient chain, and a transaction sent on the
+      // wrong one is not the transaction that was asked for.
+      await embedded.switchChain(chainId);
+      const provider = (await embedded.getEthereumProvider()) as unknown as EIP1193Provider;
+      return (await provider.request({
+        method: "eth_sendTransaction",
+        params: [
+          {
+            from: embedded.address as `0x${string}`,
+            to,
+            ...(data ? { data } : {}),
+            ...(value !== undefined ? { value: `0x${value.toString(16)}` as const } : {}),
+          },
+        ],
+        // viem's EIP-1193 types do not model eth_sendTransaction's loose shape.
+      } as never)) as `0x${string}`;
+    },
+    [embedded]
+  );
+
+  const waitForReceipt = useCallback(
+    async (hash: `0x${string}`, chainId: number): Promise<TxOutcome> => {
+      // Identical to the Decane leg, and for the identical reason: the read is
+      // PINNED to the transaction's chain rather than using the wallet's
+      // ambient provider, which can be left pointed somewhere else.
+      if (!isReceiptChain(chainId)) return "pending";
+      try {
+        const receipt = await publicClientForChain(chainId).waitForTransactionReceipt({
+          hash,
+          timeout: 90_000,
+          pollingInterval: 2_000,
+        });
+        return receiptOutcome({ status: receipt.status === "success" ? "0x1" : "0x0" });
+      } catch {
+        return "pending";
+      }
+    },
+    []
+  );
+
+  const signTypedData = useCallback(
+    async (owner: string, typedData: Record<string, unknown>): Promise<string> => {
+      if (!embedded || embedded.address.toLowerCase() !== owner.toLowerCase()) {
+        throw new Error("Signing wallet is not connected.");
+      }
+      const provider = (await embedded.getEthereumProvider()) as unknown as EIP1193Provider;
+      return (await provider.request({
+        method: "eth_signTypedData_v4",
+        params: [owner as `0x${string}`, JSON.stringify(typedData)],
+      })) as string;
+    },
+    [embedded]
+  );
+
+  return { send, waitForReceipt, signTypedData };
+}
+
+/**
  * Demo mode mounts no Decane provider, so the hooks above would throw on render
  * rather than return nothing. Branching at MODULE level is the same shape
  * `useAuth` and `useEmbeddedWallet` use, and for the same reason: a conditional
@@ -202,4 +290,8 @@ function useDemoEvmSend(): EvmSend {
   return { send: refuse, waitForReceipt: pending, signTypedData: refuse };
 }
 
-export const useEvmSend: () => EvmSend = DEMO_AUTH ? useDemoEvmSend : useDecaneEvmSend;
+export const useEvmSend: () => EvmSend = DEMO_AUTH
+  ? useDemoEvmSend
+  : PRIVY_AUTH
+    ? usePrivyEvmSend
+    : useDecaneEvmSend;

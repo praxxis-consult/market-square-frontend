@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useSocialAuth } from "decane-connect-kit";
 import { Spinner } from "@/components/ui/button";
 import { SquareLockup } from "@/components/ui/square-mark";
-import { DEMO_AUTH } from "@/lib/auth-mode";
+import { DEMO_AUTH, PRIVY_AUTH } from "@/lib/auth-mode";
 import { useAuth } from "@/hooks/use-auth";
 import { sq } from "@/lib/square-path";
 
@@ -37,8 +37,39 @@ import { sq } from "@/lib/square-path";
  * The kit reads the `decane_*` parameters off whatever URL it lands on and
  * clears them itself, so there is nothing to parse here. This waits, says which
  * of the two is happening, and gets out of the way.
+ *
+ * ─── THERE IS NO CALLBACK ON THE PRIVY LEG ──────────────────────────────────
+ * Under `NEXT_PUBLIC_AUTH_PROVIDER=privy` the only doors are an email code and
+ * an external wallet — the staging app has every OAuth provider disabled — so
+ * nothing ever redirects here. The split is at MODULE level because
+ * `useSocialAuth()` THROWS when `DecaneKit` is not mounted ("Decane hooks must
+ * be called inside <DecaneKit>"), and it threw during prerender of
+ * /_not-found and /messages, failing the build — this page is reachable from
+ * the shell, so an early return inside the component is too late.
  */
-export function AuthCallbackPage() {
+export const AuthCallbackPage: () => React.ReactNode = PRIVY_AUTH
+  ? PrivyAuthCallbackPage
+  : DecaneAuthCallbackPage;
+
+/**
+ * Nothing redirects here on the Privy leg, so this is the state of having
+ * arrived somewhere that cannot happen. It sends the reader home rather than
+ * explaining a route they did not mean to be on.
+ */
+function PrivyAuthCallbackPage() {
+  const router = useRouter();
+  useEffect(() => {
+    router.replace(sq("/"));
+  }, [router]);
+  return (
+    <div className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-[#0F0F0F]">
+      <SquareLockup className="[--lockup-mark:80px]" />
+      <Spinner className="h-5 w-5" />
+    </div>
+  );
+}
+
+function DecaneAuthCallbackPage() {
   const { phase } = useSocialAuth();
   const { ready, authenticated } = useAuth();
   const router = useRouter();

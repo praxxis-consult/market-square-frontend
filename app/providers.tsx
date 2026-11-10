@@ -6,7 +6,8 @@ import { SQUARE_WALLET_PROTECTION } from "@/lib/wallet-protection";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "sonner";
 import { createQueryClient } from "@/lib/query-client";
-import { DEMO_AUTH } from "@/lib/auth-mode";
+import { DEMO_AUTH, PRIVY_AUTH } from "@/lib/auth-mode";
+import { PrivyAuthProvider } from "@/components/providers/privy-auth-provider";
 import { useDecaneCredentials } from "@/hooks/use-decane-credentials";
 import { DecaneRecoveryHost } from "@/components/providers/decane-recovery-host";
 import { DecaneTokenBridge } from "@/components/providers/decane-token-bridge";
@@ -28,6 +29,10 @@ const DECANE_CHAINS = ["evm:8453", "evm:1", "solana:mainnet"];
 
 function AuthProvider({ children }: { children: React.ReactNode }) {
   if (DEMO_AUTH) return <>{children}</>;
+  // The staging leg: Privy is the vendor, so DecaneKit is not mounted at all.
+  // Mounting both would put two session owners on one origin, each rotating its
+  // own token into the one slot `lib/auth-token.ts` holds. See lib/auth-mode.ts.
+  if (PRIVY_AUTH) return <PrivyAuthProvider>{children}</PrivyAuthProvider>;
   return <DecaneAuthProvider>{children}</DecaneAuthProvider>;
 }
 

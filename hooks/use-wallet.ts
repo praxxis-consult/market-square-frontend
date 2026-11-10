@@ -1,7 +1,8 @@
 "use client";
 
 import { useSocialAuth } from "decane-connect-kit";
-import { DEMO_AUTH } from "@/lib/auth-mode";
+import { useWallets } from "@privy-io/react-auth";
+import { DEMO_AUTH, PRIVY_AUTH } from "@/lib/auth-mode";
 import { useAuth } from "@/hooks/use-auth";
 
 export interface WalletState {
@@ -24,6 +25,27 @@ function useDecaneWallet(): WalletState {
   const { ready, authenticated } = useAuth();
   if (!ready || !authenticated) return { address: null, ready };
   return { address: addresses?.evm ?? null, ready: true };
+}
+
+/**
+ * The Privy leg. `privy` is Privy's own name for the embedded wallet, as
+ * opposed to an injected or WalletConnect one, and it is the only wallet the
+ * BFF's ownership check will accept — `getRequestWallet` resolves the session's
+ * EMBEDDED address, so an external wallet the browser named would be proven
+ * against a different address and refused. Same rule as `lib/wallet.ts`.
+ *
+ * Null is expected here far more often than under Decane: the staging Privy app
+ * has `create_on_login: off`, so an email account may genuinely have no
+ * embedded wallet. Every KASH and buy surface already treats null as "nothing
+ * useful to do", which is the correct behaviour rather than a gap to paper over.
+ */
+function usePrivyWallet(): WalletState {
+  const { ready: walletsReady, wallets } = useWallets();
+  const { ready, authenticated } = useAuth();
+  if (!ready || !authenticated) return { address: null, ready };
+  if (!walletsReady) return { address: null, ready: false };
+  const embedded = wallets.find((w) => w.walletClientType === "privy");
+  return { address: embedded?.address ?? null, ready: true };
 }
 
 /**
@@ -50,4 +72,8 @@ function useDemoWallet(): WalletState {
  * proves ownership server-side by asking Decane for the same address
  * (`getRequestWallet` in `lib/server/auth.ts`).
  */
-export const useEmbeddedWallet: () => WalletState = DEMO_AUTH ? useDemoWallet : useDecaneWallet;
+export const useEmbeddedWallet: () => WalletState = DEMO_AUTH
+  ? useDemoWallet
+  : PRIVY_AUTH
+    ? usePrivyWallet
+    : useDecaneWallet;
